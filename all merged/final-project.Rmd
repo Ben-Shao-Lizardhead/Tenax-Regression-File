@@ -1,0 +1,786 @@
+---
+title: "Final Project, Tenax Research"
+author: "Yucheng Shao"
+date: "Due 12/16/2020"
+output: 
+  pdf_document: default
+---
+
+
+# Introduction:
+
+ The purpose of this analysis is to find a reasonable model for predicting concentration of some organic chemicals exist in  single cell organisms (bioavailibility) using the amount of the chemical found on Tenax (a sorbent material) via single point extraction.  
+ All the measurements with no data for the dependent variable have been removed.  
+ The dependent variable is the concentration of chemical on the organism (corganism).  
+ The potential predictors are:  
+ type of chemical (chemical)  
+ molecular weight (MW)  
+ shape of molecule (planner)  
+ concentration of chemical on Tenax (ctenax)  
+ mass of chemical on Tenax (mtenax)  
+ type of organism (organism)  
+ research origin of data (research)  
+ proportion of organic carbon in sediment (OC)  
+ type of sediment (tsed)  
+\medskip
+ The assumptions are:  
+ The system has reached equilibrium.  
+ The total mass of organism tissue present are equal.  
+ The unknown sediment types are assumed to be the same.  
+\medskip
+ I thought the concentration should be less than 1.  
+ However, the concentration is in total chemical captured (ng) over mass of organic carbon (g), which can well be more than 1.  
+ Therefore, I will not be using logistic regression here.  
+ 
+\newpage
+
+# Mutilple linear regression
+
+ First, I will try a linear regression.  
+ Noted that the mass of chemical on Tenax is just mutiplying the concentration of chemical on Tenax by the proportion of organic carbon.  
+ Because the total mass on Tenax may be a better representation of total chemical present.  
+I will compare models and decide which one to include.  
+
+## Quick look at the variables and a simple model
+
+ First I would like to see possible correlation:  
+
+```{r echo=FALSE}
+
+fp_data <- read.csv("Tenax data ND removed2.csv",stringsAsFactors = TRUE)
+
+library(psych)
+
+pairs.panels(fp_data,ellipses=FALSE,smooth=FALSE,lm=TRUE)
+
+#res_fp1 <- lm(corganism~chemical+MW+planner+ctenax+mtenax+organism+research+OC+tsed,data=fp_data)
+res_fp11 <- lm(corganism~chemical+MW+planner+ctenax+organism+research+OC+tsed,data=fp_data)
+res_fp12 <- lm(corganism~chemical+MW+planner+mtenax+organism+research+OC+tsed,data=fp_data)
+
+
+```
+
+ Try no interaction model first.  
+
+```{r echo=FALSE}
+
+library(pander)
+#summary(res_fp1)
+summary(res_fp11)
+summary(res_fp12)
+
+```
+
+ It would appear that concentration on tenax (or mass on tenax) of the chemical, type of chemical, molecular weight, and type of sediment are likely significant predictors.  
+ The NA's may be singularities where the variables are not linearly independent.  
+ I will look at them and see if the problem persists after the model selection.  
+
+## Check the assumptions for linear model
+
+ Check the boxCox to decide if a transformation on y is needed:  
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.height=3}
+
+library(car)
+library(magrittr)
+library(forecast)
+boxCox(res_fp11)
+boxCox(res_fp12)
+
+```
+
+ It appears that the variance of the residuals is not constant (1 is not inside the interval).  
+ Take a natural log transformation ($\hat{y}$ = ln(y)):  
+ 
+```{r echo=FALSE, fig.height=3}
+
+res_fp21 <- lm(log(corganism)~chemical+MW+planner+ctenax+organism+research+OC+tsed,data=fp_data)
+res_fp22 <- lm(log(corganism)~chemical+MW+planner+mtenax+organism+research+OC+tsed,data=fp_data)
+boxCox(res_fp21)
+boxCox(res_fp22)
+
+```
+
+ It appears that the transformation does fix the problem.  
+
+\medskip
+
+ Now, check the residual plots.  
+ 
+```{r echo=FALSE, fig.height=3}
+
+plot(res_fp21,1)
+plot(res_fp22,1)
+
+```
+
+ This seems terrible, but I do not know a good way to fix this.  
+ I think there might be something going on with measurement 83 and 71.  
+ Let's check the other plots and the cook's distance.  
+ 
+```{r echo=FALSE, fig.height=3}
+
+plot(res_fp21,2)
+plot(res_fp22,2)
+
+plot(res_fp21,5)
+plot(res_fp22,5)
+
+```
+
+ The measurement 71 is definitely bad.  
+ Now, try and remove the measurement.  
+ 
+```{r echo=FALSE, fig.height=3}
+
+res_fp31 <- lm(log(corganism)~chemical+MW+planner+ctenax+organism+research+OC+tsed,data=fp_data[-c(71,83),])
+res_fp32 <- lm(log(corganism)~chemical+MW+planner+mtenax+organism+research+OC+tsed,data=fp_data[-c(71,83),])
+plot(res_fp31,5)
+plot(res_fp32,5)
+
+plot(res_fp31,2)
+plot(res_fp32,2)
+```
+
+ I tried to remove measurement 71, but then measurement 83 get on the 0.5 line.  
+ So I removed it as well and the rest of the data seem to be acceptable.  
+ And the residuals seem to be more normally distributed (QQ plot), which is good.  
+ I checked the two measurements removed.  
+ First I thought that their chemical concentration were too high that they break from the pattern.  
+ However, although they are among the ones with higher chemical concentration, they are not the highest ones.  
+ There are other data having high chemical concentration but not appear to tilt the regression as much.  
+ Nonetheless, the measurements that deviates from the cluster appear to generally have higher chemical concentration, suggesting that the prediction may have much higher error at higher concentration.  
+\medskip
+
+## Try a two way interaction model
+
+ Check for y transformation:
+
+```{r echo=FALSE, fig.height=3}
+
+res_fp41 <- lm(log(corganism)~(chemical+MW+planner+ctenax+organism+research+OC+tsed)^2,data=fp_data)
+res_fp42 <- lm(log(corganism)~(chemical+MW+planner+mtenax+organism+research+OC+tsed)^2,data=fp_data)
+
+bf1 <- boxCox(res_fp41)
+lambdaf1 <- bf1$x[which.max(bf1$y)]
+
+bf2 <- boxCox(res_fp42)
+lambdaf2 <- bf1$x[which.max(bf2$y)]
+
+lambdaf1
+lambdaf2
+
+#fit.fullft <- lm(bcnPower(lowbid,lambdaf,gamma=0)~dotest+lberatio+numids+daysest+rdlngth+pctasph+pctbase+pctexcav+pctmobil+pctstruc+pcttraf,data=f09_data)
+#boxCox(fit.fullft)
+
+```
+
+ The two way interaction requires a different y transformation where $\hat{y}$ = $(y^{\lambda}-1) \div \lambda$ with $\lambda$ = 0.4242 .
+
+```{r echo=FALSE, fig.height=3}
+
+fit.fullfp1 <- lm(bcnPower(corganism,-0.1,gamma=0)~(chemical+MW+planner+ctenax+organism+research+OC+tsed)^2,data=fp_data)
+
+fit.fullfp2 <- lm(bcnPower(corganism,-0.1,gamma=0)~(chemical+MW+planner+mtenax+organism+research+OC+tsed)^2,data=fp_data)
+
+boxCox(fit.fullfp1)
+boxCox(fit.fullfp2)
+
+
+```
+
+ I tried with $\lambda$ = 0.4242, but the transformation did not fix the problem.  
+ Instead, it worked with $\lambda$ = -0.1, which is displayed in the graphs above.  
+ I will be using that for the two way interaction model.  
+\medskip
+ Now check the cook's distance.  
+
+ 
+```{r echo=FALSE, fig.height=3}
+
+plot(fit.fullfp1,5)
+plot(fit.fullfp2,5)
+
+```
+
+ It appears that I should remove the measurements 123 and 188.  
+ These are different points than the no interaction model.  
+ This means that I cannot compare the resulting best models from the two groups.  
+\medskip 
+ Now, I want to check if removing the two points solve the problem, or cause any new problems.  
+ 
+```{r echo=FALSE, fig.height=3}
+
+
+fit.fullfp11 <- lm(bcnPower(corganism,-0.1,gamma=0)~(chemical+MW+planner+ctenax+organism+research+OC+tsed)^2,data=fp_data[-c(123,188),])
+
+fit.fullfp21 <- lm(bcnPower(corganism,-0.1,gamma=0)~(chemical+MW+planner+mtenax+organism+research+OC+tsed)^2,data=fp_data[-c(123,188),])
+
+boxCox(fit.fullfp11)
+boxCox(fit.fullfp21)
+
+plot(fit.fullfp11,1)
+plot(fit.fullfp21,1)
+plot(fit.fullfp11,2)
+plot(fit.fullfp21,2)
+plot(fit.fullfp11,5)
+plot(fit.fullfp21,5)
+
+```
+ 
+ It appears that the cook's distance plot seems fine now. No one data point is having too much influence.  
+ The residual plot still seems bad, but I do not know how to fix that.  
+ I could remove more points, but that is not very reasonable to do.  
+ The QQ plot appears that the residuals are normally distributed.  
+ Again, the points 188 and 123 are also among the highest chemical concentration.  
+
+# Model selection
+
+## First look at the no interaction models
+
+ Models using concentration of chemical on Tenax:  
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+res_fp31 <- lm(log(corganism)~chemical+MW+planner+ctenax+organism+research+OC+tsed,data=fp_data[-c(71,83),])
+res_fp32 <- lm(log(corganism)~chemical+MW+planner+mtenax+organism+research+OC+tsed,data=fp_data[-c(71,83),])
+
+library(olsrr)
+
+res.bs_fp31 <- ols_step_best_subset(res_fp31)
+library(knitr)
+kable(res.bs_fp31[,c("n","predictors","aic","sbic")],row.names=FALSE)
+
+#plot(res.bs_fp31$aic)
+#plot(res.bs_fp31$sbic)
+#plot(res.bs_fp31$adjr)
+#the graphs did not help
+
+```
+
+ It would appear the best model based on best subset is the fifth model:  
+ corganims = chemical + MW + ctenax + organism + tsed	 
+ (since they have smallest aic and bic value)  
+\medskip
+ Let's see if the forward step wise selection (using p-value):  
+ 
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+res.sf_fp31 <- ols_step_forward_p(res_fp31,penter=0.05)
+res.sb_fp31 <- ols_step_backward_p(res_fp31,prem=0.05)
+library(knitr)
+res.sf_fp31
+
+#pander(summary(res.sf_fp31$model))
+
+```
+ 
+ The model selected is:  
+ corganims = research + ctenax + tsed	 
+ What about using backward step wise selection?  
+ 
+```{r echo=FALSE}
+res.sb_fp31
+```
+ 
+ The resulting model is the same as suggested by the forward step wise selection.   
+ 
+ 
+\medskip
+
+ Now, check the two selected model.  
+ Since they are not reduced version of each other, I would better use cross validation (leave one out).  
+ 
+```{r echo=FALSE}
+#res_fp31 <- lm(log(corganism)~ctenax+research+tsed,data=fp_data[-c(71,83),])
+
+bs31 <- lm(log(corganism)~chemical+MW+ctenax+organism+tsed,data=fp_data[-c(71,83),])
+sf31 <- lm(log(corganism)~research+ctenax+tsed,data=fp_data[-c(71,83),])
+#sf31 <- res.sf_fp31$model
+#summary(res.sb_fp31$model)
+
+library(cvTools)
+
+cvFit(bs31,data=fp_data[-c(71,83),],y=log(fp_data[-c(71,83),]$corganism),cost=rmspe,K=652)
+#cvFit(sf31,data=fp_data[-c(71,83),],y=log(fp_data[-c(71,83),]$corganism),cost=rmspe,K=652)
+
+```
+ 
+ The second model (from step wise selection) suffers from rank deficiency and the CV did not work on it.  
+ 
+\medskip
+
+ Let's check the AIC value of both model:  
+ 
+```{r echo=FALSE}
+
+AIC(bs31)
+AIC(sf31)
+
+```
+  
+  It appears that the model from the best subset have the smallest AIC value.  
+  This is kind of unfair because the best subset selection used AIC in the first place.  
+  Nonetheless, I will go with the model selected by best subset.  
+  (corganims = chemical + MW + ctenax + organism + tsed)  
+  
+\medskip
+
+ Models using mass of chemical on Tenax:  
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+res.bs_fp32 <- ols_step_best_subset(res_fp32)
+library(knitr)
+kable(res.bs_fp32[,c("n","predictors","aic","sbic")],row.names=FALSE)
+
+```
+
+ Similarly, the best model based on best subset is the sixth model:  
+ corganims = chemical + MW + mtenax + organism + OC + tsed	 
+ Notice that compared to the result from previous selection, the proportion of organic carbon is included.  
+ This is likely because the ctenax is just mtenax $\div$ OC.  
+
+\medskip
+
+ Now, try the step wise selections:  
+ 
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+res.sf_fp32 <- ols_step_forward_p(res_fp32,penter=0.05)
+res.sb_fp32 <- ols_step_backward_p(res_fp32,prem=0.05)
+
+res.sf_fp32
+res.sb_fp32
+#pander(summary(res.sf_fp31$model))
+
+```
+ 
+ Similarly, the models selected by the backward and forward step wise selection are the same.  
+ Also, the variable "research" is used replacing "organism", "MW", and "chemical".  
+ The reason, I suppose is that different types of molecules, organisms, and chemicals were used for different researches.  
+ So in a way, the information of these variable may be partially represented by the "research".  
+\medskip
+
+ Anyway, let's check the two models from best subset and step wise selection:  
+ 
+```{r echo=FALSE}
+
+bs32 <- lm(log(corganism)~chemical+MW+mtenax+organism+tsed+OC,data=fp_data[-c(71,83),])
+sf32 <- lm(log(corganism)~research+mtenax+tsed+OC,data=fp_data[-c(71,83),])
+
+cvFit(bs32,data=fp_data[-c(71,83),],y=log(fp_data[-c(71,83),]$corganism),cost=rmspe,K=652)
+#cvFit(sf32,data=fp_data[-c(71,83),],y=log(fp_data[-c(71,83),]$corganism),cost=rmspe,K=652)
+
+```
+
+ The model using "research" (step wise) again suffers from rank deficiency.  
+ 
+\medskip
+
+ Let's check the AIC value of both model:  
+ 
+```{r echo=FALSE}
+
+AIC(bs32)
+AIC(sf32)
+
+```
+
+ Again, the best subset model is better.  
+ 
+\medskip
+
+ Now compare the two model using ctenax and mtenax.  
+ Since they are using the same data set, I can try to use cross validation.  
+ 
+```{r echo=FALSE}
+
+cvFit(bs31,data=fp_data[-c(71,83),],y=log(fp_data[-c(71,83),]$corganism),cost=rmspe,K=652)
+cvFit(bs32,data=fp_data[-c(71,83),],y=log(fp_data[-c(71,83),]$corganism),cost=rmspe,K=652)
+
+```
+
+ It appears that the model with ctenax, concentraion of chemical on tenax, is better than the model using mtenax and OC for, essentially, the same portion of information.  
+ The combined version of the information is good enough and it is not necessary to use the two variables for that.  
+ So the resulting best model is:  
+ corganims = chemical + MW + ctenax + organism + tsed
+ 
+\medskip
+
+ Let's take a look at the model:  
+ 
+```{r echo=FALSE}
+pander(summary(bs31))
+```
+ 
+ The model is:  
+ $ln(corganism) = 4.616 -0.00119 \times MW + 6.579 \times 10^{-5} \times ctenax$
+ The above add:  
+ 2.802 if chemical is PCB  
+ .3331 if chemical is Permethrin  
+ .3052 if organism is LV  
+ 2.116 if sediment is humic acid  
+ 2.204 if sediment is LPH  
+ 2.390 if sediment is saw dust  
+ .7779 if sediment is unknown  
+ So the concentration of chemical captured by the organism is negatively correlated with the molecular weight of the chemical and positively correlated with the concentration of chemical captured by the Tenax.  
+ This is expected since the heavier the molecule, the slower and harder it is expected to move across phases.  
+ The more chemical captured by Tenax indicates a higher level of chemical present in the system and thus the chemical captured by organism in the same system is expected to be higher.  
+ For the type of chemical, the Permethrin and Bifenthrin are less different in their prediction, only different in a multiple of 1.4 .  
+ The PCBs have a 16.5 fold increase in the chemical concentration on organism.  
+
+\medskip
+
+ Can I use the information from molecular weight to cover the information from type of chemical?  
+ 
+```{r echo=FALSE}
+bs31 <- lm(log(corganism)~chemical+MW+ctenax+organism+tsed,data=fp_data[-c(71,83),])
+bs31r <- lm(log(corganism)~MW+ctenax+organism+tsed,data=fp_data[-c(71,83),])
+
+anova(bs31r,bs31)
+
+```
+ 
+ The p-value is smaller than 0.05, suggesting that there is enough evidence that the full model is better.  
+ I cannot remove the variable "chemical".  
+ The type of chemical is important even when the molecular weight is considered.  
+ 
+\medskip
+
+ I would like to see if the linear dependent problem of the variables is resolved.  
+ 
+```{r echo=FALSE}
+
+car::vif(bs31)
+
+```
+
+ The VIF value is less than 5, which is suggested to be acceptable.  
+ The linear dependent problem is resolved.  
+
+## Now check the two way interaction model models
+
+ Models using concentration of chemical on Tenax:  
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+library(olsrr)
+
+fit.fullfp11 <- lm(bcnPower(corganism,-0.1,gamma=0)~(chemical+MW+planner+ctenax+organism+research+OC+tsed)^2,data=fp_data[-c(123,188),])
+
+#fit.fullfp111 <- lm(bcnPower(corganism,-0.1,gamma=0)~(chemical+MW+ctenax+organism+tsed)^2,data=fp_data[-c(123,188),])
+
+fit.fullfp21 <- lm(bcnPower(corganism,-0.1,gamma=0)~(chemical+MW+planner+mtenax+organism+research+OC+tsed)^2,data=fp_data[-c(123,188),])
+
+#res.bs_fp111 <- ols_step_best_subset(fit.fullfp111)
+#library(knitr)
+#kable(res.bs_fp111[,c("n","predictors","aic","sbic")],row.names=FALSE)
+
+#plot(res.bs_fp11$aic)
+#plot(res.bs_fp11$sbic)
+#plot(res.bs_fp11$adjr)
+
+```
+
+ The full model was too big for both cross validation and best subset selection.  
+ Therefore, I reduced the model to only include the variables determined to be significant in the no interaction model.  
+ 
+\medskip
+
+ I will have to recheck the assumptions:  
+ 
+```{r echo=FALSE, fig.height=3}
+
+res_fp2wr1 <- lm(bcnPower(corganism,-0.1,gamma=0)~(chemical+MW+ctenax+organism+tsed)^2,data=fp_data)
+
+boxCox(res_fp2wr1)
+plot(res_fp2wr1,5)
+
+```
+
+ It appears that the $\lambda = -0.1$ transformation still works.  
+ Also there is no data need to be removed based on cook's distance.  
+ However, for the sake of comparison, I would like to remove data 71 and 83 so that I may be able to compare the resulting model with the no interaction model.  
+
+```{r echo=FALSE, fig.height=3}
+
+res_fp2wr2 <- lm(bcnPower(corganism,-0.1,gamma=0)~(chemical+MW+ctenax+organism+tsed)^2,data=fp_data[-c(71,83),])
+
+boxCox(res_fp2wr2)
+plot(res_fp2wr2,5)
+
+```
+
+ (the assumptions still hold after removing 71 and 83)
+
+```{r echo=FALSE, warning=FALSE}
+
+res.bs_fp2wr2 <- ols_step_best_subset(res_fp2wr2)
+#longer object length is not a multiple of shorter object length?
+#res.bs_fp2wr2
+
+```
+
+```{r echo=FALSE, warning=FALSE}
+kable(res.bs_fp2wr2[,c("n","predictors","aic","sbic")],row.names=FALSE)
+
+```
+
+ The model selected:  
+ (the ":" in equation means multiply, interaction of the two varibles without linear teams)  
+ corganism = chemical:MW+chemical:ctenax+chemical:organism+MW:ctenax+MW:tsed+ctenax:tsed  
+ Problem with this model is that the interaction terms does not have the corresponding linear terms in the model.  
+ However, I will still take it and compare it to the models selected by step wise selections.  
+ 
+\medskip
+
+ Now, try some step wise selections:  
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+res.sf_fp2wr2 <- ols_step_forward_p(res_fp2wr2,penter=0.05)
+res.sb_fp2wr2 <- ols_step_backward_p(res_fp2wr2,prem=0.05)
+
+res.sf_fp2wr2
+res.sb_fp2wr2
+#pander(summary(res.sf_fp31$model))
+
+```
+
+ The model for forward step wise selection:  
+ corganism = chemical+ctenax+organism+MW+tsed+chemical:tsed+chemical:ctenax+MW:ctenax+MW:organism  
+ The model for backward step wise selection:  
+ corganism = chemical+ctenax+organism+MW+tsed+chemical:ctenax+chemical:organism+chemical:MW+chemical:tsed+
+\ \ \ \ \ \ ctenax:MW+organism:MW+organism:tsed
+
+\medskip
+
+ Now, compare the three models selected:  
+ 
+```{r echo=FALSE, warning=FALSE}
+
+res_fp2wr_bs <- lm(bcnPower(corganism,-0.1,gamma=0)~chemical:MW+chemical:ctenax+chemical:organism+MW:ctenax+MW:tsed+ctenax:tsed,data=fp_data[-c(71,83),])
+res_fp2wr_sf <- lm(bcnPower(corganism,-0.1,gamma=0)~chemical+ctenax+organism+MW+tsed+chemical:tsed+chemical:ctenax+MW:ctenax+MW:organism,data=fp_data[-c(71,83),])
+res_fp2wr_sb <- lm(bcnPower(corganism,-0.1,gamma=0)~chemical+ctenax+organism+MW+tsed+chemical:ctenax+chemical:organism+chemical:MW+chemical:tsed+ctenax:MW+organism:MW+organism:tsed,data=fp_data[-c(71,83),])
+
+cvFit(res_fp2wr_bs,data=fp_data[-c(71,83),],y=bcnPower(fp_data[-c(71,83),]$corganism,-0.1,gamma=0),cost=rmspe,K=652)
+cvFit(res_fp2wr_sf,data=fp_data[-c(71,83),],y=bcnPower(fp_data[-c(71,83),]$corganism,-0.1,gamma=0),cost=rmspe,K=652)
+cvFit(res_fp2wr_sb,data=fp_data[-c(71,83),],y=bcnPower(fp_data[-c(71,83),]$corganism,-0.1,gamma=0),cost=rmspe,K=652)
+
+```
+
+ The rank deficiency warning still pops up.  
+ However, this time cross validation does produce a result.  
+ It suggests that the model suggested by the best subset is not better than the onces suggested by the step wise selection.  
+ The two step wise selection models have equal CV values.  
+ 
+\medskip
+
+ Let's look at AIC of the two remaining models:  
+ 
+```{r echo=FALSE}
+
+#AIC(res_fp2wr_sf)
+#AIC(res_fp2wr_sb)
+#BIC(res_fp2wr_sf)
+#BIC(res_fp2wr_sb)
+
+pander(summary(res_fp2wr_sf))
+#pander(summary(res_fp2wr_sb))
+
+```
+
+ I checked the output of the two linear model and find that they are actually the same, despite the inputs are different.  
+ Somehow, some of the variables I put in are lost after fitting the model.  
+ Regardless, I will select this model to be the best model from two way selection:  
+  
+ $(corganism^{-0.1}-1) \div (-0.1) = 9.19 - 0.01491 \times MW + 0.00978 \times ctenax+4.001 \times 10^{-7} \times MW \times ctenax$
+ The above add:  
+ 1.799 if chemical is PCB  
+ -0.007123 if chemical is Permethrin  
+ -5.345 if organism is LV  
+ 0.8975 if sediment is humic acid  
+ 0.7918 if sediment is LPH  
+ 0.9902 if sediment is saw dust  
+ 0.2979 if sediment is unknown  
+ The slope of ctenax term add:  
+ -0.009858 if the chemical is PCB
+ -0.006389 if the chemical is Permethrin
+ The slope of MW term add:  
+ 0.01358 if organism is LV  
+ 
+\medskip
+
+ Again, we see a positive correlation between corganism and ctenax and a negative correlation between corganism and MW.  
+ The interaction term is just a correction of the effect of ctenax or MW on corganism when the other variable is constant.  
+ The categorical variables are correction of the y-intercept (after the transformation).  
+ The type of chemical is used to correct the slope of ctenax and the type of organism is used to correct the slope of MW.  
+ This is likely due to the tenax having different affinity towards different types of chemical, even the molecular weight is considered.  
+ Also, the type of organism may be more different in respond to the molecular weight of the chemical when picking the chemical up. Whereas the Tenax is more concerned with the hydrophobicity, and thus the type of chemical.  
+ 
+## Compare the no interaction model with the two way interaction model
+
+ Since I have set the two model to use the same data set, I can try to use cross validation:  
+ (notice that I change the expression of the two way interaction model to the one provided after the fitting)
+
+```{r echo=FALSE, warning=FALSE}
+
+res_fpnif <- lm(log(corganism)~chemical+MW+ctenax+organism+tsed,data=fp_data[-c(71,83),])
+
+res_fp2wf <- lm(bcnPower(corganism,-0.1,gamma=0)~chemical+ctenax+organism+MW+tsed+chemical:ctenax+MW:ctenax+MW:organism,data=fp_data[-c(71,83),])
+
+#pander(summary(res_fp2wf))
+#just checking if I changed the model or not
+
+cvFit(res_fpnif,data=fp_data[-c(71,83),],y=log(fp_data[-c(71,83),]$corganism),cost=rmspe,K=652)
+cvFit(res_fp2wf,data=fp_data[-c(71,83),],y=bcnPower(fp_data[-c(71,83),]$corganism,-0.1,gamma=0),cost=rmspe,K=652)
+
+```
+
+ The cross validation suggests that the full model fits better than the reduced model.  
+ Thus the best model is the selected model from the 2 way interaction models.  
+
+# Look at the confidence intervals 
+
+```{r echo=FALSE}
+
+#library(plot3D)
+
+#x <- fp_data$MW
+#y <- fp_data$ctenax
+#z <- fp_data$corganism
+
+#scatter3D(x, y, z, phi = 0, bty = "g", pch = 20, cex = 0.5)
+
+#text3D(x, y, z, data=fp_data, labels = fp_data$organism,
+        #add = TRUE, colkey = FALSE, cex = 0.5)
+
+#grid.lines = 26
+#x.pred <- seq(min(x), max(x), length.out = grid.lines)
+#y.pred <- seq(min(y), max(y), length.out = grid.lines)
+#xy <- expand.grid( x = x.pred, y = y.pred)
+#z.pred <- matrix(bcnPowerInverse(predict(res_fp2wf,data.frame(chemical="PCB",organism="LV",MW=x.pred,ctenax=y.pred,tsed="unknown"),interval="confidence",level=0.95),-0.1,0), nrow = grid.lines, ncol = grid.lines)
+
+#fitpoints <- predict(res_fp2wf)
+
+#scatter3D(x, y, z, pch = 18, cex = 2, 
+    #theta = 20, phi = 20, ticktype = "detailed",
+    #xlab = "wt", ylab = "disp", zlab = "mpg",  
+    #surf = list(x = x.pred, y = y.pred, z = z.pred,  
+    #facets = NA, fit = fitpoints), main = "mtcars")
+
+```
+
+```{r echo=FALSE, warning=FALSE}
+
+x <- fp_data$MW
+y <- fp_data$ctenax
+z <- fp_data$corganism
+y.pred <- seq(min(y), max(y), 1)
+f1 <- data.frame(chemical="PCB",organism="LV",MW=326.4,ctenax=y.pred,tsed="unknown")
+
+y2 <- fp_data[which(fp_data$MW==326.4&fp_data$chemical=='PCB'&fp_data$organism=='LV'&fp_data$tsed=='unknown'), ]$ctenax
+z2 <- fp_data[which(fp_data$MW==326.4&fp_data$chemical=='PCB'&fp_data$organism=='LV'&fp_data$tsed=='unknown'), ]$corganism
+
+#z.pred1 <- bcnPowerInverse(predict(res_fp2wf,data.frame(chemical="PCB",organism="LV",MW=326.4,ctenax=y.pred,tsed="unknown"),interval="confidence",level=0.95),-0.1,0)
+
+plot(z2~y2,xlab="concentraion on tenax",ylab="concentraion on organism",main="setting MW=326.4, tsed=unknown, chemical=PCB, organism=LV")
+
+
+conf.b <- bcnPowerInverse(predict(res_fp2wf,f1,interval="confidence"),-0.1,0)
+pred.b <- bcnPowerInverse(predict(res_fp2wf,f1,interval="prediction"),-0.1,0)
+
+
+matlines(f1,conf.b[,2],type="l",col="red",lwd=2,lty=2)
+matlines(f1,conf.b[,3],type="l",col="red",lwd=2,lty=2)
+matlines(f1,pred.b[,2],type="l",col="green",lwd=2,lty=3)
+matlines(f1,pred.b[,3],type="l",col="green",lwd=2,lty=3)
+
+```
+
+ It appears that the prediction interval seems more reasonable.  
+ The confidence interval is way off.  
+ 
+```{r echo=FALSE, warning=FALSE}
+
+y.pred <- seq(min(y), max(y), 1)
+f1 <- data.frame(chemical="PCB",organism="LV",MW=292,ctenax=y.pred,tsed="unknown")
+
+y2 <- fp_data[which(fp_data$MW==292&fp_data$chemical=='PCB'&fp_data$organism=='LV'&fp_data$tsed=='unknown'), ]$ctenax
+z2 <- fp_data[which(fp_data$MW==292&fp_data$chemical=='PCB'&fp_data$organism=='LV'&fp_data$tsed=='unknown'), ]$corganism
+
+plot(z2~y2,xlab="concentraion on tenax",ylab="concentraion on organism",main="setting MW=292, tsed=unknown, chemical=PCB, organism=LV")
+
+
+conf.b <- bcnPowerInverse(predict(res_fp2wf,f1,interval="confidence"),-0.1,0)
+pred.b <- bcnPowerInverse(predict(res_fp2wf,f1,interval="prediction"),-0.1,0)
+
+
+matlines(f1,conf.b[,2],type="l",col="red",lwd=2,lty=2)
+matlines(f1,conf.b[,3],type="l",col="red",lwd=2,lty=2)
+matlines(f1,pred.b[,2],type="l",col="green",lwd=2,lty=3)
+matlines(f1,pred.b[,3],type="l",col="green",lwd=2,lty=3)
+
+```
+
+ This does not look good at all.  
+ It appears that the prediction interval is working somewhat at lower concentration but blow off once the concentration on Tenax goes over 15000 or so.  
+ 
+```{r echo=FALSE, warning=FALSE}
+
+y.pred <- seq(min(y), max(y), 1)
+f1 <- data.frame(chemical="Bifenthrin",organism="LV",MW=422.9,ctenax=y.pred,tsed="unknown")
+
+y2 <- fp_data[which(fp_data$MW==422.9&fp_data$chemical=='Bifenthrin'&fp_data$organism=='LV'&fp_data$tsed=='unknown'), ]$ctenax
+z2 <- fp_data[which(fp_data$MW==422.9&fp_data$chemical=='Bifenthrin'&fp_data$organism=='LV'&fp_data$tsed=='unknown'), ]$corganism
+
+plot(z2~y2,xlab="concentraion on tenax",ylab="concentraion on organism",main="setting MW=422.9, tsed=unknown, chemical=Bifenthrin, organism=LV")
+
+
+conf.b <- bcnPowerInverse(predict(res_fp2wf,f1,interval="confidence"),-0.1,0)
+pred.b <- bcnPowerInverse(predict(res_fp2wf,f1,interval="prediction"),-0.1,0)
+
+
+matlines(f1,conf.b[,2],type="l",col="red",lwd=2,lty=2)
+matlines(f1,conf.b[,3],type="l",col="red",lwd=2,lty=2)
+matlines(f1,pred.b[,2],type="l",col="green",lwd=2,lty=3)
+matlines(f1,pred.b[,3],type="l",col="green",lwd=2,lty=3)
+
+```
+
+ I think the model predicts heavier molecules better.  
+ The prediction interval seems reasonable here.  
+ Additionally, the set of points that is above the confidence interval are the ones with least age time.  
+ Age time is a variable I did not include, because the other researches do not have this variable.  
+ The small age time might mean that the organic carbon did not fully absorb the chemical (not settled) before the sorbent (organism) was introduced, resulting in a higher concentration of chemical.  
+ Thus I think the confidence interval here is probably reasonable.  
+ 
+```{r echo=FALSE, warning=FALSE}
+
+y.pred <- seq(min(y), max(y), 1)
+f1 <- data.frame(chemical="Permethrin",organism="LV",MW=391.3,ctenax=y.pred,tsed="unknown")
+
+y2 <- fp_data[which(fp_data$MW==391.3&fp_data$chemical=='Permethrin'&fp_data$organism=='LV'&fp_data$tsed=='unknown'), ]$ctenax
+z2 <- fp_data[which(fp_data$MW==391.3&fp_data$chemical=='Permethrin'&fp_data$organism=='LV'&fp_data$tsed=='unknown'), ]$corganism
+
+plot(z2~y2,xlab="concentraion on tenax",ylab="concentraion on organism",main="setting MW=391.3, tsed=unknown, chemical=Permethrin, organism=LV")
+
+
+conf.b <- bcnPowerInverse(predict(res_fp2wf,f1,interval="confidence"),-0.1,0)
+pred.b <- bcnPowerInverse(predict(res_fp2wf,f1,interval="prediction"),-0.1,0)
+
+
+matlines(f1,conf.b[,2],type="l",col="red",lwd=2,lty=2)
+matlines(f1,conf.b[,3],type="l",col="red",lwd=2,lty=2)
+matlines(f1,pred.b[,2],type="l",col="green",lwd=2,lty=3)
+matlines(f1,pred.b[,3],type="l",col="green",lwd=2,lty=3)
+
+```
+
+ Similar result for Permethrin, however, there is a huge gap between the sets of data.  
+ I would propose more experiments in between the concentration to fix that.  
+
+
+
+
